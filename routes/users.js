@@ -1,36 +1,24 @@
-const { User, validateLogin, validateUser, Status } = require("../models/user");
-const Joi = require("joi");
-const config = require("config");
-const jwt = require("jsonwebtoken");
-const bcrypt = require("bcrypt");
+const {
+  User,
+  validateUser,
+  validateLogin,
+  Status,
+  Request,
+} = require("../models/user");
 const express = require("express");
+const bcrypt = require("bcrypt");
 const router = express.Router();
+const { makeClient } = require("../startup/db");
 
 // All endpoints and route handlers go here
 
-//User Login
-router.post("/login", async (req, res) => {
-  try {
-    const { error } = validateLogin(req.body);
-    if (error) return res.status(400).send(error.details[0].message);
-    let user = await User.findOne({ email: req.body.email });
-    if (!user) return res.status(400).send("Invalid email or password .");
-
-    const token = user.generateAuthToken();
-    return res.send(token);
-  } catch (ex) {
-    return res.status(500).send(`Internal Server Error: ${ex}`);
-  }
-});
-
-//register User
+//REGISTER
 router.post("/register", async (req, res) => {
   try {
-    const { error } = validate(req.body);
+    const { error } = validateUser(req.body);
     if (error) return res.status(400).send(error.details[0].message);
     let user = await User.findOne({ email: req.body.email });
     if (user) return res.status(400).send("User already registered.");
-
     const salt = await bcrypt.genSalt(10);
     user = new User({
       username: req.body.username,
@@ -38,10 +26,7 @@ router.post("/register", async (req, res) => {
       password: await bcrypt.hash(req.body.password, salt),
     });
     await user.save();
-    const token = jwt.sign(
-      { _id: user._id, username: user.username },
-      config.get("jwtSecret")
-    );
+    const token = user.generateAuthToken();
     return res
       .header("x-auth-token", token)
       .header("access-control-expose-headers", "x-auth-token")
@@ -50,29 +35,29 @@ router.post("/register", async (req, res) => {
     return res.status(500).send(`Internal Server Error: ${ex}`);
   }
 });
-
-router.delete("/:id", async (req, res) => {
+//LOGIN
+router.post("/login", async (req, res) => {
   try {
-    const user = await User.findByIdAndRemove(req.params.id);
-    if (!user)
-      return res
-        .status(400)
-        .send(`The product with id “${id.params.id}” does not exist`);
-    return res.send(user);
-  } catch (ex) {
-    return res.status(500).send(`Internal Server Error:${ex}`);
-  }
-});
-
-router.get("/view/:email", async (req, res) => {
-  try {
-    const userStatus = await Status.find({ email: req.params.email });
-    return res.send(userStatus);
+    const { error } = validateLogin(req.body);
+    if (error) return res.status(400).send(error.details[0].message);
+    let user = await User.findOne({ email: req.body.email });
+    if (!user) return res.status(400).send("Invalid email or password .");
+    //prolem with brcrpyt
+    const validPassword = await bcrypt.compare(
+      req.body.password,
+      user.password
+    );
+    if (!validPassword) return res.status(400).send("Invalid password.");
+    const token = user.generateAuthToken();
+    return res.send({
+      token: token,
+      // username:username,
+      email: req.body.email,
+    });
   } catch (ex) {
     return res.status(500).send(`Internal Server Error: ${ex}`);
   }
 });
-
 //DELETE USER
 router.delete("/:id", async (req, res) => {
   try {
@@ -114,12 +99,14 @@ router.delete("/delete/:id", async (req, res) => {
   }
 });
 // SEE LIST OF FRIEND REQUEST
-router.get("/view/:requesteeId", async (req, res) => {
+router.get("/view/:email", async (req, res) => {
+  let conn = await makeClient();
   try {
-    const requestList = await Request.find({
-      requesteeId: req.params.requesteeId,
-    });
-    return res.send(requestList);
+    const collection = await conn.db("myFirstDatabase").collection("status");
+    const userStatuses = await collection
+      .find({ email: req.params.email })
+      .toArray();
+    return res.send(userStatuses);
   } catch (ex) {
     return res.status(500).send(`Internal Server Error: ${ex}`);
   }
@@ -140,8 +127,11 @@ router.post("/request", async (req, res) => {
 //GET POST TIMELINE
 router.get("/view/:email", async (req, res) => {
   try {
-    const userStatus = await Status.find({ email: req.params.email });
-    return res.send(userStatus);
+    const collection = await client.db("myFirstDatabase").collection("status");
+    const userStatuses = await collection
+      .find({ email: req.params.email })
+      .toArray();
+    return res.send(userStatuses);
   } catch (ex) {
     return res.status(500).send(`Internal Server Error: ${ex}`);
   }
